@@ -1,0 +1,98 @@
+---
+title: "Untitled"
+author: "Jason"
+date: "2021/5/26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+source("D:\\Jason/getsql.R")
+
+sql <- "with orders as (
+	-- orders
+	SELECT convert(char(10), h.FDate - DAY(h.FDate)+1, 121) 'Period', 'order' src
+	, d.FQty
+	, i.FItemID sku
+	, o.FItemID cust
+	FROM SEorder h 
+	JOIN SEOrderEntry d on h.FInterID = d.FInterID 
+	JOIN t_Organization o ON o.FItemID = h.FCustID
+	JOIN t_ICItem i On i.Fitemid = d.Fitemid
+	WHERE h.FCancellation = 0 AND h.FChangeMark = 0  -- If marked changed, the data is obsoleted.
+	AND h.FInterID <> 120663   --- wrong unit price, excluded
+	AND i.FNumber like '%5616%'
+	AND o.FShortName not like '%欣宇%'
+),
+sales as (
+	SELECT convert(char(10),mv.FDate - day(mv.Fdate) + 1,121) 'period', 'sale' src
+	, mvd.Fqty
+	,i.FItemid sku
+	,o.FItemID cust
+	FROM ICStockBill mv
+	JOIN ICStockBillEntry mvd ON mv.FInterID = mvd.FInterID
+	JOIN SEOrder sh ON mvd.FOrderInterID = sh.FInterID
+	JOIN t_Organization o ON o.FItemID = sh.FCustID
+	JOIN t_ICItem i ON i.FItemID = mvd.FItemID
+	WHERE mv.FTranType = 21
+	AND i.FNumber like '%5616%'
+	AND o.FShortName not like '%欣宇%'
+),
+al as (
+	select * from orders 
+	union all
+	select * from sales  
+)
+select  period, src, cust,SUM(FQty) FQty
+FROM al
+group by period, src, cust
+having sum(FQTY) > 0
+"
+da <- getsql(sql, svr="K3")
+
+```
+
+```{r}
+da$period <- as.Date(da$period)
+
+cus <- unique(da$cust)
+col <- unique(cus) |> 
+            length() |>
+                rainbow()
+
+o <- da[da$src=='order',]
+s <- da[da$src=='sale',]
+
+
+
+plot( range(da$period), range(da$FQty) ,type = 'n'
+      ,main = 'S5616订单与出货趋势'
+      ,xlab = '月份',
+      ,ylab = '数量')
+
+for (i in seq(cus)) {
+  oi <- o[o$cust == cus[i],]
+  if(nrow(oi) > 0 ) {
+    lines(oi$period,oi$FQty, col=col[i], lty= 1, lwd = 1) # solid,  width 1 for order
+    points(oi$period,oi$FQty,col=col[i], pch = letters[i])
+  } 
+  
+  si <- s[s$cust == cus[i],]
+  if(nrow(si)>0){
+    lines(si$period,si$FQty, col=col[i], lty = 3,lwd = 3) # dash,  width 3 for sale
+    points(si$period,si$FQty,col=col[i], pch = letters[i])
+  }  
+}
+
+txt <- "1. 几乎整个5月都没有新订单； \n
+2. 几乎每个月，第一、二大客户的实际出货小于订单量；\n
+3. 第二大客户订单连续几个月持续大幅下滑； \n
+4. 第二大客户出货连续两个月大幅下滑，5月几乎没有出货；"
+
+text(as.Date('2019-09-01'),40000,label=txt, adj=c(0,1),cex=.7)
+
+
+
+```
+
